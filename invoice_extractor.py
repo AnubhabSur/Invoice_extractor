@@ -8,7 +8,7 @@ Schema is defined separately in pydantic_schema.py and imported here.
 Gemini enforces the structure at the API level — no JSON in the prompt.
 
 Requirements:
-    pip install google-generativeai Pillow python-dotenv pydantic
+    pip install google-genai Pillow python-dotenv pydantic
 
 Setup:
     Create a .env file in the project root:
@@ -35,10 +35,11 @@ except ImportError:
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
-    print("ERROR: 'google-generativeai' not installed.")
-    print("Run:  pip install google-generativeai")
+    print("ERROR: 'google-genai' not installed.")
+    print("Run:  pip install google-genai")
     sys.exit(1)
 
 try:
@@ -117,22 +118,23 @@ def extract_invoice(image_path: str, api_key: str) -> Invoice:
     image = Image.open(path)
 
     print("[2/3] Calling Gemini 2.5 Flash ...")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
-    # ── Schema is passed here — imported from pydantic_schema.py ─────────────
-    response = model.generate_content(
-        [EXTRACTION_PROMPT, image],
-        generation_config=genai.GenerationConfig(
+    # ── New SDK: instantiate a Client (replaces genai.configure + GenerativeModel)
+    client = genai.Client(api_key=api_key)
+
+    # ── Schema is passed via response_json_schema using Pydantic's model_json_schema()
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[EXTRACTION_PROMPT, image],
+        config=types.GenerateContentConfig(
             temperature=0,
-            response_mime_type="application/json",  # force JSON output
-            response_schema=Invoice,                 # schema from pydantic_schema.py
+            response_mime_type="application/json",          # force JSON output
+            response_json_schema=Invoice.model_json_schema(), # schema from pydantic_schema.py
         ),
     )
 
     print("[3/3] Validating response with Pydantic ...")
-    raw_data = json.loads(response.text)
-    invoice  = Invoice(**raw_data)  # Pydantic validates all fields here
+    invoice = Invoice.model_validate_json(response.text)   # parse + validate in one step
 
     return invoice
 
